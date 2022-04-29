@@ -93,8 +93,8 @@ if __name__ == '__main__':
     e = np.linalg.eigvalsh(Hk)
     chi = bloch_wavefunctions(R, k)
 
-    plt.plot(k.ravel(), np.real(e))
-    plt.show()
+    #plt.plot(k.ravel(), np.real(e))
+    #plt.show()
 
     Nb = 5 # 5 blocks of length N // Nb
     m = N // Nb
@@ -122,14 +122,11 @@ if __name__ == '__main__':
     for kix in range(len(k_)):
         for tix in range(len(T_)):
             for tix_ in range(len(T_)):
-                for jix in range(Norb):
-                    for jix_ in range(Norb):
-                        phase = np.exp(1.j * k_[kix] * (T_[tix] - T_[tix_]))
-                        Hk_[kix, jix, jix_] += phase * np.einsum("i,ij,j->",\
-                                phip[tix, :, jix], H, phip[tix_, :, jix_]) / Nb
-                        # This can probably be shorter; i.e., we should probably be
-                        # doing everything in the individual block space instead of the
-                        # larger translation space if possible...
+                phase = np.exp(1.j * k_[kix] * (T_[tix] - T_[tix_]))
+                Hk_[kix] += phase * np.einsum("ia,ij,jb->ab", phip[tix], H, phip[tix_]) / Nb
+                # This can probably be shorter; i.e., we should probably be
+                # doing everything in the individual block space instead of the
+                # larger translation space if possible...
 
     e = np.linalg.eigvalsh(Hk_)
     plt.plot(k_.ravel(), np.real(e))
