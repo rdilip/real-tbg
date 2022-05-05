@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 def setup_hamiltonian(n, J=1, h=0., pbc=1):
     """
@@ -21,18 +22,6 @@ def setup_hamiltonian(n, J=1, h=0., pbc=1):
     H[n-1, 0] = J * pbc
     return H
 
-def get_bloch_hamiltonian(h, T, k):
-    """
-    Get the Bloch Hamiltonian for a spin chain.
-    Args:
-        h (np.array): Real-space hamiltonian with shape (a, a, n , n) 
-        T (np.array): List of lattice translation vectors.
-        k (np.array): List of points in k space.
-    """
-    diff = T[:, np.newaxis, :] - T[np.newaxis, :, :]
-    phase = np.exp(1.j * np.einsum("kp,ijp->kij", k, diff))
-    return np.einsum("kij,abij->kab", phase, h) / h.shape[-1]
-
 def get_kpts(Ncells, B):
     """
     Get k points.
@@ -47,21 +36,6 @@ def get_kpts(Ncells, B):
     kmesh = kmesh / np.array(Ncells)
     kpts = np.tensordot(kmesh, B, axes=(1, 0))
     return kpts
-
-def bloch_wavefunctions(T, k, basis=None):
-    """
-    Get the Bloch wavefunctions for a spin chain.
-    Args:
-        T (np.array): List of lattice translation vectors.
-        k (np.array): List of points in k space.
-    """
-    if basis is None:
-        basis = np.eye(len(T))
-    assert T.shape[0] == basis.shape[0]
-    phase = np.exp(1.j * np.einsum("ij,lj->il", k, T))
-    # same number of k points as basis vectors...
-    chi = np.einsum("ij,aj->ia", phase, basis) # basis is indexed by columns
-    return chi
 
 def embed_vectors(V, N, start_coords):
     """ Embeds vectors V into a larger space of size N 
@@ -83,18 +57,60 @@ def embed_vectors(V, N, start_coords):
             embed_vecs[i, :, j] = np.array(v)
     return embed_vecs
 
+def get_momentum_operator(V, ks):
+    """
+    Get the momentum operator for a list of vectors.
+    Args:
+        V (np.array): List of vectors. Last dimension should index vectors (same
+            convention as linalg.eigh)
+        ks (np.array): List of points in k space.
+    """
+    Nvectors = V.shape[-1]
+    d = V.shape[-2]
+    Nk = len(ks)
+    P = np.zeros((d, d), dtype=complex)
+    for i in range(Nvectors):
+        P += ks[i] * np.outer(V[:, i], V[:, i])
+    return P
+
+def get_bloch_wavefunction(ks, T, basis):
+    """
+    Get the Bloch wavefunction for a spin chain.
+    Args:
+        k (np.array): List of points in k space.
+        T (np.array): List of lattice translation vectors.
+        basis (np.array): Basis vectors. Should have shape (len(T), N, Norb), where
+            Norb is the number of orbitals in the basis and N is the dimension of the
+            space (call embed_vectors to get the correct shape).
+    """
+    Nk, N, Norb = basis.shape
+    assert (Nk == len(ks)) and (Nk == len(T))
+
+    phases = np.exp(1.j * np.einsum("ij,lj->il", ks, T))
+    chi = np.tensordot(phases, basis, [1, 0]) / np.sqrt(Nk)
+
+    return chi
+
+def get_bloch_hamiltonian(chi, H):
+    return np.einsum("kia,ij,kjb->kab", chi.conj(), H, chi)
+
 if __name__ == '__main__':
     N = 100
-    H = setup_hamiltonian(N, J=1).reshape((1, 1, N, N))
-    R = np.arange(N).reshape((N, 1))
+    H = setup_hamiltonian(N, J=1)
+    T = np.arange(N).reshape((N, 1))
     b = 2*np.pi*np.linalg.inv([[1.]])
     k = get_kpts((N,), b)
-    Hk = get_bloch_hamiltonian(H, R, k)
-    e = np.linalg.eigvalsh(Hk)
-    chi = bloch_wavefunctions(R, k)
+    basis = np.eye(N).reshape((len(T), N, 1))
 
-    #plt.plot(k.ravel(), np.real(e))
-    #plt.show()
+    chik = get_bloch_wavefunction(k, T, basis)
+    Hk = get_bloch_hamiltonian(chik, H)
+
+    e, V = np.linalg.eigh(Hk)
+
+    plt.plot(k.ravel(), np.real(e))
+    plt.show()
+    P = get_momentum_operator(chi, k)
+
 
     Nb = 5 # 5 blocks of length N // Nb
     m = N // Nb
@@ -106,10 +122,10 @@ if __name__ == '__main__':
     # _, Va = np.linalg.eigh(Ha)
     phip = embed_vectors(Vp, N, np.arange(0, N, m))
 
+
     # Need to change this to the length of basis
     Norb = m
 
-    Hk_ = np.zeros((Nb, Norb, Norb), dtype=complex)
 
     b_ = 2*np.pi*np.linalg.inv([[m]])
     T_ = (np.arange(Nb) * m).reshape((Nb, 1))
@@ -119,19 +135,18 @@ if __name__ == '__main__':
 
     # Take all m orbitals. We have Nb of m orbitals each, and they'rea ll linearly independent,
     # so it's just a change of basis.
-    for kix in range(len(k_)):
-        for tix in range(len(T_)):
-            for tix_ in range(len(T_)):
-                phase = np.exp(1.j * k_[kix] * (T_[tix] - T_[tix_]))
-                Hk_[kix] += phase * np.einsum("ia,ij,jb->ab", phip[tix], H, phip[tix_]) / Nb
-                # This can probably be shorter; i.e., we should probably be
-                # doing everything in the individual block space instead of the
-                # larger translation space if possible...
+    Hk_ = get_bloch_hamiltonian(H, T_, k_, phip)
 
-    e = np.linalg.eigvalsh(Hk_)
-    plt.plot(k_.ravel(), np.real(e))
+    e, V = np.linalg.eigh(Hk_)
+    plt.plot(k_.ravel(), np.real(e), c='C1')
 
-    e = np.linalg.eigvalsh(Hk)
-    plt.plot(k.ravel(), np.real(e.ravel()))
+    chi_folded, Hk_folded = get_bloch_wavefunction(k_, T_, phip, H)
+    E2 = np.linalg.eigvalsh(Hk_folded)
+
+    plt.plot(k_.ravel(), np.real(E2), ls="dashed", c='C2')
+
+
+    #e = np.linalg.eigvalsh(Hk)
+    #plt.plot(k.ravel(), np.real(e.ravel()))
     plt.show()
         
