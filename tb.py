@@ -177,7 +177,7 @@ def get_momentum_operator(V, ks):
                     V[k_ix, :, orb_ix])
     return P
 
-def get_bloch_wavefunction(ks, T, basis) -> np.array:
+def get_bloch_wavefunction(ks, T, basis, shift=None) -> np.array:
     """
     Get the Bloch wavefunction for a spin chain. The basis is a list of vectors that live
     in the larger space of the Hamiltonian (i.e., if the Hamiltonian is N x N, then each
@@ -195,11 +195,9 @@ def get_bloch_wavefunction(ks, T, basis) -> np.array:
     """
     Nk, N, Norb = basis.shape
     assert (Nk == len(ks)) and (Nk == len(T))
-    print(T.shape)
 
     phases = np.exp(1.j * np.einsum("ij,lj->il", ks, T))
     chi = np.tensordot(phases, basis, [1, 0]) / np.sqrt(Nk)
-
     return chi
 
 def expectation(chi, A, diag=False):
@@ -254,13 +252,16 @@ def basis_transform_and_relabel(Hlatt: np.array,
     kout, Vout = np.zeros(ecluster.shape, dtype=complex), np.zeros(Vcluster.shape, dtype=complex)
 
     for index_group in degen_indices:
+        print(index_group)
         Vdegen = Vcluster[:, index_group]
         Pproj = np.einsum("im,ij,jn->mn", Vdegen.conj(), Pclust, Vdegen)
         kproj, Ck = np.linalg.eigh(Pproj)
         chik_degen = np.tensordot(Ck, Vdegen, [0,1])
+
         k_new = np.einsum("mi,ij,mj->m", chik_degen.conj(), Pclust, chik_degen)
         kout[index_group] = k_new
         Vout[:, index_group] = chik_degen.T
+
     if correct_k:
         # only one dimension at a time
         zero_ix = np.isclose(kout, 0)
