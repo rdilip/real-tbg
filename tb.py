@@ -48,19 +48,33 @@ def oned_chain_k_hamiltonian(kpts: ArrayLike, a: ArrayLike, J: float, h: float, 
     Hk += -t1 * np.array([[0., 1.],[1., 0.]])
     return Hk
 
+def _col_vector(N: int, i: int) -> ArrayLike:
+    """ Returns the column vector of size N with 1 in the ith position. """
+    return np.array([1 if j == i else 0 for j in range(N)])
 
-def mlg_hamiltonian(N: Tuple[int, int], t: float=1., bc=1) -> ArrayLike:
+def mlg_hamiltonian(N: Tuple[int, int], a: ArrayLike, t: float=1., bc=1) -> ArrayLike:
     """ Sets up the Hamiltonian for a monolayer graphene lattice. Note: this Hamiltonian function
     implicitly assumes that N = (N1, N2) corresponds to N1 tilings of the vector (\sqrt{3}/2, 1/2)
     and N2 tilings of the vector (1, 0). I *think* it should work for any lattice, but I haven't
     checked this. Use geometry.MLGGeom to get the correct geometry for consistency.
+
+    This function right now currently returns the Hamiltonian, the basis, and the translation vectors.
+    Ideally the latter two should be separate, but for now keep it here because it makes getting the 
+    translation vectors easy, and if these things arne't consistent you'll run into problems with
+    forming the crystal momentum operator.
+
     Args:
         N (tuple): Number of cells in the chain.
         J (float): Coupling
         bc (int): boundary conditions
     Returns:
+        H (np.array): Hamiltonian matrix
+        basis (np.array): basis vectors
+        T (np.array): translation vectors
     """
     H = np.zeros((2, *N, 2, *N), dtype=complex)
+    basis = np.zeros((2, *N, 2, *N), dtype=complex)
+    T = np.zeros((*N, 2))
     # 2 atoms per cell, one cell for lattice vector. 
 
     mn = np.array(np.meshgrid(np.arange(N[0]), np.arange(N[1]))).T.reshape(-1, 2)
@@ -79,14 +93,19 @@ def mlg_hamiltonian(N: Tuple[int, int], t: float=1., bc=1) -> ArrayLike:
         H[0, m, n, 1, m, n] += -t
         H[1, m, n, 0, m, n] += -t
 
+        T[m, n] = m*a[0] + n*a[1]
+
+        basis[0, m, n, 0, m, n] = 1
+        basis[1, m, n, 1, m, n] = 1
+
 
     H = H.reshape((2*N[0]*N[1], 2*N[0]*N[1]))
-    return H
+    basis = basis.reshape((2, N[0]*N[1], 2*N[0]*N[1])).transpose((1,2,0))
+    return H, basis, T
 
-def mlg_k_hamiltonian(kpts: ArrayLike, t: float, d: float) -> ArrayLike:
+def mlg_k_hamiltonian(kpts: ArrayLike, t: float, deltas: ArrayLike) -> ArrayLike:
     """ Returns the analytic Hamiltonian for a monolayer graphene lattice at specific
     k points """
-    deltas = MLGGeom(d=d).deltas
     Nk = kpts.shape[0]
     Hk = np.zeros((Nk, 2, 2), dtype=complex)
     phases = np.tensordot(kpts, deltas, axes=[1,1])
@@ -252,7 +271,6 @@ def basis_transform_and_relabel(Hlatt: np.array,
     kout, Vout = np.zeros(ecluster.shape, dtype=complex), np.zeros(Vcluster.shape, dtype=complex)
 
     for index_group in degen_indices:
-        print(index_group)
         Vdegen = Vcluster[:, index_group]
         Pproj = np.einsum("im,ij,jn->mn", Vdegen.conj(), Pclust, Vdegen)
         kproj, Ck = np.linalg.eigh(Pproj)
