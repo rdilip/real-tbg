@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import time
 from typing import Tuple
 
-from geometry import MLGGeom
-from utils import partition_indices_by_value
+from geometry import MLGGeom, TBGGeom
+from utils import partition_indices_by_value, simdiag
 
 def oned_chain_hamiltonian(n, J=1, h=0., bc=1, dimer=0.0, nbands=1) -> ArrayLike:
     """
@@ -20,7 +20,8 @@ def oned_chain_hamiltonian(n, J=1, h=0., bc=1, dimer=0.0, nbands=1) -> ArrayLike
         n (int): number of spins
         J (float): coupling strength
         h (float): external field strength
-        pbc (int): periodic boundary conditions. 1 for periodic, 0 for open, -1 for anti-periodic.
+        pbc (int): periodic boundary conditions. 1 for periodic, 0 for open, 
+            -1 for anti-periodic.
         dimer (float): If true, flips strength of every other bond
     """
     H = np.zeros((n, n))
@@ -30,38 +31,18 @@ def oned_chain_hamiltonian(n, J=1, h=0., bc=1, dimer=0.0, nbands=1) -> ArrayLike
     H[0, n - 1] = H[n - 1, 0] = J * (1 - dimer * (-1)**(n-1)) * bc
     return H
 
-def oned_chain_k_hamiltonian(kpts: ArrayLike, a: ArrayLike, J: float, h: float, dimer: float) -> ArrayLike:
-    """
-    Setup the k point Hamiltonian for a dimerized spin chain 
-    Args:
-        n (int): number of spins
-        J (float): coupling strength
-        h (float): external field strength
-        pbc (int): periodic boundary conditions. 1 for periodic, 0 for open, -1 for anti-periodic.
-        dimer (float): If true, flips strength of every other bond
-    """
-    t1 = J * (1 - dimer)
-    t2 = J * (1 + dimer)
-    phases = np.exp(1.j*np.einsum("ik,k->i", kpts, a))
-    Hk = -t2 * phases[:, np.newaxis, np.newaxis] * np.array([[0., 1.],[0., 0.]])
-    Hk += Hk.transpose((0,2,1)).conj()
-    Hk += -t1 * np.array([[0., 1.],[1., 0.]])
-    return Hk
-
-def _col_vector(N: int, i: int) -> ArrayLike:
-    """ Returns the column vector of size N with 1 in the ith position. """
-    return np.array([1 if j == i else 0 for j in range(N)])
-
 def mlg_hamiltonian(N: Tuple[int, int], a: ArrayLike, t: float=1., bc=1) -> ArrayLike:
-    """ Sets up the Hamiltonian for a monolayer graphene lattice. Note: this Hamiltonian function
-    implicitly assumes that N = (N1, N2) corresponds to N1 tilings of the vector (\sqrt{3}/2, 1/2)
-    and N2 tilings of the vector (1, 0). I *think* it should work for any lattice, but I haven't
-    checked this. Use geometry.MLGGeom to get the correct geometry for consistency.
+    """ Sets up the Hamiltonian for a monolayer graphene lattice. Note: this
+    Hamiltonian function implicitly assumes that N = (N1, N2) corresponds to N1
+    tilings of the vector (\sqrt{3}/2, 1/2) and N2 tilings of the vector (1,
+    0). I *think* it should work for any lattice, but I haven't checked this.
+    Use geometry.MLGGeom to get the correct geometry for consistency.
 
-    This function right now currently returns the Hamiltonian, the basis, and the translation vectors.
-    Ideally the latter two should be separate, but for now keep it here because it makes getting the 
-    translation vectors easy, and if these things arne't consistent you'll run into problems with
-    forming the crystal momentum operator.
+    This function right now currently returns the Hamiltonian, the basis, and
+    the translation vectors. Ideally the latter two should be separate, but for
+    now keep it here because it makes getting the translation vectors easy, and
+    if these things arne't consistent you'll run into problems with forming the
+    crystal momentum operator.
 
     Args:
         N (tuple): Number of cells in the chain.
@@ -69,7 +50,7 @@ def mlg_hamiltonian(N: Tuple[int, int], a: ArrayLike, t: float=1., bc=1) -> Arra
         bc (int): boundary conditions
     Returns:
         H (np.array): Hamiltonian matrix
-        basis (np.array): basis vectors
+        basis (np.array): basis vectors, (Norb, Ncells, N)
         T (np.array): translation vectors
     """
     H = np.zeros((2, *N, 2, *N), dtype=complex)
@@ -103,16 +84,40 @@ def mlg_hamiltonian(N: Tuple[int, int], a: ArrayLike, t: float=1., bc=1) -> Arra
     basis = basis.reshape((2, N[0]*N[1], 2*N[0]*N[1])).transpose((1,2,0))
     return H, basis, T
 
-def mlg_k_hamiltonian(kpts: ArrayLike, t: float, deltas: ArrayLike) -> ArrayLike:
-    """ Returns the analytic Hamiltonian for a monolayer graphene lattice at specific
-    k points """
-    Nk = kpts.shape[0]
-    Hk = np.zeros((Nk, 2, 2), dtype=complex)
-    phases = np.tensordot(kpts, deltas, axes=[1,1])
-    J = -t * np.exp(1.j * phases).sum(1)
-    Hk[:, 0, 1] = J
-    Hk[:, 1, 0] = J.conj()
-    return Hk
+def _tbg_tb_hamiltonian(cell1: ArrayLike, cell2: ArrayLike, d: float, h: float) -> ArrayLike:
+    """ Returns the tight binding matrix elements between two cells, using the Slater-
+    Koster parameters for TBG.
+    """
+    r0 = 0.184 * np.sqrt(3) * d # decay length
+    R = cell1[:, np.newaxis, :] - cell2[np.newaxis, :, :]
+    Rn = np.linalg.norm(R, axis=2)
+    # Vppx = -2.7 * np.exp(-(Rn - d) / r0)
+    Vppx = -2.7 * (Rn <= d + 1.e-10)
+    Vppz = 0.48 * np.exp(-(Rn - h) / r0)
+    decay = R[:, :, 2] / Rn
+    decay *= decay
+    t = -Vppx * (1. - decay) - Vppz * decay
+    t[np.diag_indices_from(t)] = 0.
+    return t
+
+def _tbg_tb_hamiltonian_batched(cell1: ArrayLike, cells2: ArrayLike, d: float, h: float) -> ArrayLike:
+    """ Returns the tight binding matrix elements between two cells, using the Slater-
+    Koster parameters for TBG. NOTE: batching doesn't seem to be significantly
+    faster than a regular for-loop.
+    """
+    r0 = 0.184 * np.sqrt(3) * d # decay length
+    R = cell1[np.newaxis, :, np.newaxis, :] - cells2[:, np.newaxis, :, :]
+    # 
+    Rn = np.linalg.norm(R, axis=3)
+    # Vppx = -2.7 * np.exp(-(Rn - d) / r0)
+    Vppx = -2.7 * (Rn <= d + 1.e-10)
+    Vppz = 0.48 * np.exp(-(Rn - h) / r0)
+    decay = R[:, :, :, 2] / Rn
+    decay *= decay
+    t = -Vppx * (1. - decay) - Vppz * decay
+    Nt, N, _ = t.shape
+    t[:, np.arange(N), np.arange(N)] = 0.
+    return t
 
 def get_kpt_mesh(Ncells, B, shift=None):
     """
@@ -150,7 +155,7 @@ def high_symmetry_path(kpts: ArrayLike, pts_per_line: int) -> ArrayLike:
 def get_translation_vectors(Ncells: Tuple[int], a: ArrayLike):
     """ Returns translation vectors for a given lattice.
     Args:
-        Ncells (tuple): Tuple with form (Nx, Ny, Nz) representing the number of 
+       Ncells (tuple): Tuple with form (Nx, Ny, Nz) representing the number of 
         cells in each direction.
         a (np.array): Lattice vectors (a[i] is the ith lattice vector)
     """
@@ -159,7 +164,7 @@ def get_translation_vectors(Ncells: Tuple[int], a: ArrayLike):
     T = np.tensordot(mn, a, axes=(1, 0))
     return T
 
-def embed_vectors(V, N, start_coords):
+def embed_vectors(V: ArrayLike, N: int, start_coords: ArrayLike):
     """ Embeds vectors V into a larger space of size N 
     Args:
         V (np.array): List of vectors to embed. Last dimension should index vectors (same
@@ -196,7 +201,7 @@ def get_momentum_operator(V, ks):
                     V[k_ix, :, orb_ix])
     return P
 
-def get_bloch_wavefunction(ks, T, basis, shift=None) -> np.array:
+def get_bloch_wavefunction(ks, T, basis, shift=None) -> ArrayLike:
     """
     Get the Bloch wavefunction for a spin chain. The basis is a list of vectors that live
     in the larger space of the Hamiltonian (i.e., if the Hamiltonian is N x N, then each
@@ -219,7 +224,7 @@ def get_bloch_wavefunction(ks, T, basis, shift=None) -> np.array:
     chi = np.tensordot(phases, basis, [1, 0]) / np.sqrt(Nk)
     return chi
 
-def expectation(chi, A, diag=False):
+def expectation(chi: ArrayLike, A: ArrayLike, diag: bool=False):
     """
     Args:
         chi (np.array): Bloch wavefunction with shape (Nk, N, Norb) = (number of k points,
@@ -247,67 +252,63 @@ def get_block_transformation_matrix(u: np.array, Nblocks: int) -> np.array:
         U[i * nr: (i + 1) * nr, i * nc: (i + 1) * nc] = u
     return U
 
-
 def basis_transform_and_relabel(Hlatt: np.array,
-                                Platt: np.array,
+                                Platt: Tuple[np.array],
                                 U: np.array,
-                                correct_k: bool=False) -> np.array:
+                                correct_k: bool=False,
+                                square: bool=False) -> np.array:
     """ Transforms the lattice Hamiltonian to the cluster basis, diagonalizes, and 
-    returns the new k points and momentum eigenstates. 
+        returns the new k points and momentum eigenstates. 
+        
+        Note: there is a significantly faster way to compute the correct k point values. Even
+        though there can be mixing between equal valued k points, it turns out that the largest overlap
+        is between the `correct` k points. I implemented this at one point and it was significantly
+        faster than the current method. Unclear if it's always correct. 
     Args:
         Hlatt: (np.array): Lattice Hamiltonian with shape (N, N)
         Platt: (np.array): Lattice crystal momentum operator with shape (N, N)
         U: (np.array): Transformation matrix from lattice basis to cluster basis.
+        square: (bool): If true, diagonalizes the momentum squared to correct for mixing.
     Returns:
         np.array: New k points in cluster basis.
         np.array: New momentum eigenstates in cluster basis.
     """
     Hclust = U.T.conj() @ Hlatt @ U
-    Pclust = U.T.conj() @ Platt @ U
-
-    ecluster, Vcluster = np.linalg.eigh(Hclust)
-    degen_indices = partition_indices_by_value(ecluster)
-
-    kout, Vout = np.zeros(ecluster.shape, dtype=complex), np.zeros(Vcluster.shape, dtype=complex)
-
-    for index_group in degen_indices:
-        Vdegen = Vcluster[:, index_group]
-        Pproj = np.einsum("im,ij,jn->mn", Vdegen.conj(), Pclust, Vdegen)
-        kproj, Ck = np.linalg.eigh(Pproj)
-        chik_degen = np.tensordot(Ck, Vdegen, [0,1])
-
-        k_new = np.einsum("mi,ij,mj->m", chik_degen.conj(), Pclust, chik_degen)
-        kout[index_group] = k_new
-        Vout[:, index_group] = chik_degen.T
+    Pclust = [U.T.conj() @ P @ U for P in Platt]
+    ndim = len(Pclust)
+    data, V = simdiag([Hclust, *Pclust])
 
     if correct_k:
-        # only one dimension at a time
-        zero_ix = np.isclose(kout, 0)
-        Pclust2 = Pclust @ Pclust
-        k_new = np.sqrt(np.einsum("im,ij,jm->m", Vout[:, zero_ix].conj(), Pclust2, Vout[:, zero_ix]))
-        kout[zero_ix] = k_new
+        data["k2_corrected"] = correct_k2(V, Pclust, data[len(Platt)])
+    return data, V
 
-    assert np.allclose(kout.imag, 0.)
-    return kout.real, Vout, ecluster
-
-def correct_k2(P: ArrayLike, k: ArrayLike, chik: ArrayLike) -> ArrayLike:
-    """ Note: can we use general powers of P for this? 
+def correct_k2(V: ArrayLike, P: ArrayLike, k: ArrayLike=None) -> ArrayLike:
+    """ 
     Args:
-        P: (np.array): Crystal momentum operator with shape (N, N)
-        k: (np.array): k points in cluster basis with shape (N, dim)
-        chik: (np.array): Bloch wavefunction with shape (Nk, N, Norb)
+        V: (np.array): Bloch functions with shape (N, N=Nk*Norb). Note that this
+            will typically be an output of basis_transform_and_relabel.
+        P: (np.array): Crystal momentum operator with shape (dim, N, N)
+        k: (np.array): k points in cluster basis with shape (N, dim). If None,
+            then all the k points are estimated; otherwise, only the zero valued
+            ones.
     Returns:
         k: (np.array): Replaced k points in cluster basis with shape (N, dim)
     """
-    k = k.reshape((len(k), -1))
-    P2 = P @ P
-    kzero = np.all(np.isclose(k, 0.), axis=1)
-    k2 = np.einsum("kim,ij,kjm->km", chik[kzero].conj(), P2, chik[kzero])
-    assert np.allclose(k2.imag, 0.)
+    P2 = np.array([p @ p for p in P])
+    knew = k.reshape((len(k), -1))
+    for d in range(P2.shape[0]):
+        ki = knew[:, d]
+        zero_ix = np.isclose(ki, 0.)
+        knew_i = np.einsum("im,ij,jm->m", V[:, zero_ix].conj(), P2[d], V[:, zero_ix])
+        assert np.allclose(knew_i.imag, 0.)
+        knew[zero_ix, d] = np.sqrt(knew_i.real)
+    return knew
 
-    k[kzero] = np.sqrt(k2.real)
-    return k
-
+def get_k2_error_bars(V, P):
+    P2 = [p @ p for p in P]
+    P2_avg = np.einsum("im,dij,jm->dm", V.conj(), P2, V)
+    Pavg_2 = np.einsum("im,dij,jm->dm", V.conj(), P, V)**2
+    return np.sqrt(P2_avg - Pavg_2)
 
 if __name__ == '__main__':
     N = 100
