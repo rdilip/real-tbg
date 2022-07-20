@@ -31,7 +31,10 @@ def oned_chain_hamiltonian(n, J=1, h=0., bc=1, dimer=0.0, nbands=1) -> ArrayLike
     H[0, n - 1] = H[n - 1, 0] = J * (1 - dimer * (-1)**(n-1)) * bc
     return H
 
-def mlg_hamiltonian(N: Tuple[int, int], a: ArrayLike, t: float=1., bc=1) -> ArrayLike:
+def mlg_hamiltonian(N: Tuple[int, int],
+                    a: ArrayLike,
+                    t: float=1., 
+                    bc: Tuple[int, int]=(1, 1)) -> ArrayLike:
     """ Sets up the Hamiltonian for a monolayer graphene lattice. Note: this
     Hamiltonian function implicitly assumes that N = (N1, N2) corresponds to N1
     tilings of the vector (\sqrt{3}/2, 1/2) and N2 tilings of the vector (1,
@@ -66,11 +69,15 @@ def mlg_hamiltonian(N: Tuple[int, int], a: ArrayLike, t: float=1., bc=1) -> Arra
         m3, n3 = (m - 1) % N[0], n
         m4, n4 = (m + 1) % N[0], (n - 1) % N[1]
 
-        H[1, m, n, 0, m1, n1] += -t * (bc if m == N[0] - 1 else 1)
-        H[0, m, n, 1, m2, n2] += -t * (bc if m == 0 or n == N[1] - 1 else 1)
-        H[0, m, n, 1, m3, n3] += -t * (bc if m == 0 else 1)
-        H[1, m, n, 0, m4, n4] += -t * (bc if m == N[0] - 1 or n == 0 else 1)
+        H[1, m, n, 0, m1, n1] += -t * (bc[0] if m == N[0] - 1 else 1)
+        H[0, m, n, 1, m2, n2] += -t * (bc[0] if m == 0 else 1) *\
+                                        (bc[1] if n == N[1] - 1 else 1)
 
+        H[0, m, n, 1, m3, n3] += -t * (bc[0] if m == 0 else 1)
+        H[1, m, n, 0, m4, n4] += -t * (bc[0] if m == N[0] - 1 else 1) *\
+                                        (bc[1] if n == 0 else 1)
+
+        # same unit cell
         H[0, m, n, 1, m, n] += -t
         H[1, m, n, 0, m, n] += -t
 

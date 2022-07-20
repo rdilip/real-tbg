@@ -4,8 +4,13 @@ import numpy as np
 from numpy.typing import ArrayLike
 from typing import Tuple, Callable
 import matplotlib.patches as patches
+import warnings
 
-def make_patch_function(B: ArrayLike, Ncells: Tuple[int], cmap, vals: ArrayLike):
+def make_patch_function(B: ArrayLike,
+                        Ncells: Tuple[int],
+                        cmap,
+                        vmin: float=0., 
+                        vmax: float=1.):
     """
     Returns a patch function for plotting 2d band structures. Sample usage:
 
@@ -34,10 +39,11 @@ def make_patch_function(B: ArrayLike, Ncells: Tuple[int], cmap, vals: ArrayLike)
     mn = np.array([[1,1],[1,-1],[-1,-1],[-1,1]])
     corners = np.tensordot(ps, mn, [1, 1]).T
     
-    if np.max(vals) - np.min(vals) == 0:
+    if np.isclose(vmin, vmax):
+        warnings.warn("vmin and vmax are equal, plotting all the same color")
         norm = lambda x: 0
     else:
-        norm = lambda val: (val - np.min(vals)) / (np.max(vals) - np.min(vals))
+        norm = lambda val: (val - vmin) / (vmax - vmin)
     
     def make_patch(center_pt, val):
         shifted_corners = center_pt + corners
