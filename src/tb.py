@@ -107,25 +107,6 @@ def _tbg_tb_hamiltonian(cell1: ArrayLike, cell2: ArrayLike, d: float, h: float) 
     t[np.diag_indices_from(t)] = 0.
     return t
 
-def _tbg_tb_hamiltonian_batched(cell1: ArrayLike, cells2: ArrayLike, d: float, h: float) -> ArrayLike:
-    """ Returns the tight binding matrix elements between two cells, using the Slater-
-    Koster parameters for TBG. NOTE: batching doesn't seem to be significantly
-    faster than a regular for-loop.
-    """
-    r0 = 0.184 * np.sqrt(3) * d # decay length
-    R = cell1[np.newaxis, :, np.newaxis, :] - cells2[:, np.newaxis, :, :]
-    # 
-    Rn = np.linalg.norm(R, axis=3)
-    # Vppx = -2.7 * np.exp(-(Rn - d) / r0)
-    Vppx = -2.7 * (Rn <= d + 1.e-10)
-    Vppz = 0.48 * np.exp(-(Rn - h) / r0)
-    decay = R[:, :, :, 2] / Rn
-    decay *= decay
-    t = -Vppx * (1. - decay) - Vppz * decay
-    Nt, N, _ = t.shape
-    t[:, np.arange(N), np.arange(N)] = 0.
-    return t
-
 def get_kpt_mesh(Ncells, B, shift=None):
     """
     Get k points.

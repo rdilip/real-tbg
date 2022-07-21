@@ -38,12 +38,14 @@ def oned_chain_k_hamiltonian(kpts: ArrayLike, a: ArrayLike, J: float, h: float, 
 def tbg_k_hamiltonian(kpts: ArrayLike,
                       m: int=31,
                       d: float=1.,
-                      t: float=1.,
-                      batched=False) -> ArrayLike:
+                      t: float=1.) -> ArrayLike:
     """
     Setup the k point Hamiltonian for a tbg lattice. Assumes constant interlayer 
     spacing -- not strictly correct. This isn't very efficient since we compute all the
     differences, not just the nearest neighbor ones.
+
+    Note: One can implement a batched version of this function, but this is 
+    much, much slower at large system sizes and makes no difference at small system sizes.
     Args:
         kpts (ArrayLike): k points
         m (int): Integer characterizing rotation angle (m=31 is 1.05 degrees).
@@ -58,11 +60,7 @@ def tbg_k_hamiltonian(kpts: ArrayLike,
     Hk = np.zeros((len(kpts), len(all_pts), len(all_pts)), dtype=complex)
 
     Ts = np.hstack([Ts, np.zeros((Ts.shape[0], 1))])
-    if batched:
-        all_translated_pts = all_pts[np.newaxis, :, :] + Ts[:, np.newaxis, :]
-        HR = _tbg_tb_hamiltonian_batched(all_pts, all_translated_pts, d, geom.h)
-    else:
-        HR = np.array([_tbg_tb_hamiltonian(all_pts, all_pts+T, d, geom.h) for T in Ts])
+    HR = np.array([_tbg_tb_hamiltonian(all_pts, all_pts+T, d, geom.h) for T in Ts])
     phases = np.exp(1.j * np.einsum("ki,ti->kt", kpts, Ts[:, :2]))
     Hk = np.tensordot(phases, HR, axes=[1,0])
 
