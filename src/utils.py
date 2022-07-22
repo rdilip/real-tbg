@@ -27,10 +27,7 @@ def check_pt_in_lst(pt: ArrayLike, lst: ArrayLike) -> bool:
     Returns:
         bool: True if point is in list, False otherwise.
     """
-    for i in range(len(lst)):
-        if np.isclose(pt, lst[i]).all():
-            return True
-    return False
+    return np.any(np.isclose(pt[0], lst[:, 0]) & np.isclose(pt[1], lst[:, 1]))
 
 def check_lst_in_lst(lst1: ArrayLike, lst2: ArrayLike) -> bool:
     """ Checks if lst2 is a subset of lst1.
