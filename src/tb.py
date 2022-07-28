@@ -1,4 +1,4 @@
-""" Tight binding codes for bilayer graphene. These codes use Convention II (see
+""" Tight binding codes for blayer graphene. These codes use Convention II (see
     https://www.physics.rutgers.edu/pythtb/_downloads/915304f3240dca549efa8f49146
     3a797/pythtb-formalism.pdf for details). The only difference is that the phase
     factors within a cell are not included (i.e., we don't have terms like e^{ik\delta_j},
@@ -150,20 +150,14 @@ def get_block_transformation_matrix(u: np.array, Nblocks: int) -> np.array:
 def basis_transform_and_relabel(Hlatt: np.array,
                                 Platt: Tuple[np.array],
                                 U: np.array,
-                                correct_k: bool=False,
-                                square: bool=False) -> np.array:
+                                Norb) -> np.array:
     """ Transforms the lattice Hamiltonian to the cluster basis, diagonalizes, and 
         returns the new k points and momentum eigenstates. 
         
-        Note: there is a significantly faster way to compute the correct k point values. Even
-        though there can be mixing between equal valued k points, it turns out that the largest overlap
-        is between the `correct` k points. I implemented this at one point and it was significantly
-        faster than the current method. Unclear if it's always correct. 
     Args:
         Hlatt: (np.array): Lattice Hamiltonian with shape (N, N)
         Platt: (np.array): Lattice crystal momentum operator with shape (N, N)
         U: (np.array): Transformation matrix from lattice basis to cluster basis.
-        square: (bool): If true, diagonalizes the momentum squared to correct for mixing.
     Returns:
         np.array: New k points in cluster basis.
         np.array: New momentum eigenstates in cluster basis.
@@ -172,10 +166,22 @@ def basis_transform_and_relabel(Hlatt: np.array,
     Pclust = [U.T.conj() @ P @ U for P in Platt]
     ndim = len(Pclust)
     data, V = simdiag([Hclust, *Pclust])
+    kr = np.vstack(data[1:]).T.round(12)
+    er = data[0]
+    if kr.shape[1] == 2:
+        ix = np.lexsort((kr[:, 1], kr[:, 0]))
+    else: 
+        ix = np.lexsort((kr[:, 0],))
+    kr = kr[ix]
+    er = er[ix].reshape((-1, Norb))
 
-    if correct_k:
-        data["k2_corrected"] = correct_k2(V, Pclust, data[len(Platt)])
-    return data, V
+    for start in range(0, len(kr), Norb):
+        for i in range(start, start + Norb - 1):
+            assert np.allclose(kr[i], kr[i+1]), "We aren't producing the right"\
+                    " k point structure -- possibly a sorting issue"
+    kr = kr[::Norb]
+
+    return kr, er, V
 
 def correct_k2(V: ArrayLike, P: ArrayLike, k: ArrayLike=None) -> ArrayLike:
     """ 
@@ -189,6 +195,7 @@ def correct_k2(V: ArrayLike, P: ArrayLike, k: ArrayLike=None) -> ArrayLike:
     Returns:
         k: (np.array): Replaced k points in cluster basis with shape (N, dim)
     """
+    raise ValueError("Deprecated...and probably useless except as sanity check.")
     P2 = np.array([p @ p for p in P])
     knew = k.reshape((len(k), -1))
     for d in range(P2.shape[0]):

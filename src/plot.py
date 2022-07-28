@@ -5,6 +5,7 @@ from numpy.typing import ArrayLike
 from typing import Tuple, Callable
 import matplotlib.patches as patches
 import warnings
+from utils import check_pt_in_lst
 
 def make_patch_function(B: ArrayLike,
                         Ncells: Tuple[int],
@@ -65,3 +66,16 @@ def get_shifted_brillouin_zone_path(B: ArrayLike, Ncells: Tuple[int]):
     bz += (b1 / n1) / 2. + (b2 / n2 / 2.) # move to corner of cell
     bz -= b1 * np.ceil(n1 / 2) / n1 + b2 * np.ceil(n2 / 2) / n2
     return bz
+
+def band_structure_diff(ks: ArrayLike,
+                        kr: ArrayLike,
+                        ediff: ArrayLike,
+                        ediffr: ArrayLike) -> ArrayLike:
+    kdiff, err = [], []
+    for i in range(len(kr)):
+        check, ix = check_pt_in_lst(kr[i], ks) # ks[ix] = kr[i]
+        if check:
+            kdiff.append(kr[i])
+            err.append(np.abs(ediff[ix] - ediffr[i]))
+    return np.array(kdiff), np.array(err)
+

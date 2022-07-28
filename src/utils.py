@@ -27,7 +27,16 @@ def check_pt_in_lst(pt: ArrayLike, lst: ArrayLike) -> bool:
     Returns:
         bool: True if point is in list, False otherwise.
     """
-    return np.any(np.isclose(pt[0], lst[:, 0]) & np.isclose(pt[1], lst[:, 1]))
+    if len(lst.shape) == 1:
+        return np.any(np.isclose(pt, lst))
+
+    d = len(pt)
+    mask = np.isclose(pt[0], lst[:, 0])
+    for i in range(1, d):
+        mask = mask & np.isclose(pt[i], lst[:, i])
+    in_lst = np.any(mask)
+    ix = np.where(mask)
+    return in_lst, ix
 
 def check_lst_in_lst(lst1: ArrayLike, lst2: ArrayLike) -> bool:
     """ Checks if lst2 is a subset of lst1.
@@ -37,11 +46,15 @@ def check_lst_in_lst(lst1: ArrayLike, lst2: ArrayLike) -> bool:
     Returns:
         bool: True if lst2 is in lst1, False otherwise.
     """
+    raise ValueError("This function has a serious bug -- does not count frequencies.")
     assert lst1.shape[-1] == lst2.shape[-1]
     for pt in lst2:
         if not check_pt_in_lst(pt, lst1):
             return False
     return True
+
+def check_lsts_equal(lst1: ArrayLike, lst2: ArrayLike) -> bool:
+    return check_lst_in_lst(lst1, lst2) and check_lst_in_lst(lst2, lst1)
 
 def get_cum_dist_along_path(path: ArrayLike) -> ArrayLike:
     """ Returns the cumulative distance along a path.
