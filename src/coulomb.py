@@ -3,6 +3,8 @@ import numpy as np
 from numpy.typing import ArrayLike
 from utils import ncells_to_mn
 from typing import Tuple
+import scipy
+from scipy.spatial.distance import cdist
 
 def gate_screened_coulomb(coords, nmax=100, epsilon=1, d=1):
     diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
@@ -19,10 +21,10 @@ def yukawa(r1: ArrayLike,
     if alpha is None:
         alpha = 1. / (r1[:, 0].max() - r1[:, 0].min())
 
-    rdiff = r1[:, np.newaxis, :] - r2[np.newaxis, :, :]
-    rnorm = np.linalg.norm(rdiff, axis=-1)
-    zero_ix = np.isclose(rnorm, 0.0)
-    rnorm[zero_ix] = np.inf
+    rnorm = cdist(r1, r2)
+    if np.abs(rnorm[0,0]) < 1.e-12:
+        # diagonals are all the same
+        rnorm[np.diag_indices_from(rnorm)] = np.inf
     return np.exp(-alpha*rnorm) / rnorm
 
 def yukawa_periodic(coords: ArrayLike,
@@ -41,6 +43,7 @@ def yukawa_periodic(coords: ArrayLike,
     Norb = len(coords)
     coul = np.zeros((Norb, Norb), dtype=complex)
     lattice_vectors = np.column_stack([lattice_vectors, np.zeros(len(lattice_vectors))])
+
     for T in lattice_vectors:
         tmp = yukawa(coords, coords+T, alpha=alpha)
         coul += tmp
