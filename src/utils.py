@@ -127,3 +127,9 @@ def simdiag(Ak: ArrayLike) -> Tuple[ArrayLike, ArrayLike]:
             data[2, orig_indices] = a_new2.real
             V[:, orig_indices] = Vdegen2_orig_basis_new
     return data, V
+
+def ncells_to_mn(Ncells):
+    mn = []
+    return np.array(np.meshgrid(np.arange(-Ncells[0]//2+1, Ncells[0]//2+1),
+                    np.arange(-Ncells[1]//2+1, Ncells[1]//2+1))).reshape(2,-1).T
+

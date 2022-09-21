@@ -96,12 +96,50 @@ class TBGGeom:
         self.brillouin_zone = np.array([[0., 0.], self.b.T[0], self.b.T[0]+self.b.T[1], self.b.T[1]])
 
         self.high_sym_pts()
+        self.coords = self.get_unit_cell()
 
     def high_sym_pts(self):
         self.Gamma = np.array([0., 0.])
         self.M = 0.5 * (self.b[:, 0] + self.b[:, 1])
         self.K = (self.b[:, 0] + 2*self.b[:, 1]) / 3.
 
+    def get_unit_cell(self):
+        R = rotate(self.theta / 2.)
+        mn_top = np.array(np.linalg.inv(R @ self.a_mlg.T) @\
+                self.unit_cell.T, dtype=int)
+        mn_bot = np.array(np.linalg.inv(R.T @ self.a_mlg.T) @\
+                self.unit_cell.T, dtype=int)
+        pts = []
+        j = 0
+        h = self.h
+
+        for mnrange in [mn_top, mn_bot]:
+            mn = np.array(np.meshgrid(np.arange(np.min(mnrange[0])-3,np.max(mnrange[0])+3),
+                              np.arange(np.min(mnrange[1])-3,np.max(mnrange[1])+3)
+                             )
+                ).reshape(2,-1)
+            sl_pts = np.tensordot(self.a_mlg, mn, [0,0]).T + 1.e-16
+
+            sl_pts_rot = (rotate((-1)**j * self.theta/2.) @ sl_pts.T).T
+            deltas_rot = (rotate((-1)**j * self.theta/2.) @ self.deltas.T).T
+
+            unit_cell_A, _ = get_points_in_unit_cell(sl_pts_rot, self.a)
+            unit_cell_B, _ = get_points_in_unit_cell(sl_pts_rot + deltas_rot[0], self.a)
+
+            if j == 0:
+                unit_cell_A = np.hstack([unit_cell_A, np.zeros((unit_cell_A.shape[0], 1))])
+                unit_cell_B = np.hstack([unit_cell_B, np.zeros((unit_cell_B.shape[0], 1))])
+            else:
+                unit_cell_A = np.hstack([unit_cell_A, h * np.ones((unit_cell_A.shape[0], 1))])
+                unit_cell_B = np.hstack([unit_cell_B, h * np.ones((unit_cell_B.shape[0], 1))])
+
+            pts.extend(unit_cell_A)
+            pts.extend(unit_cell_B)
+            j += 1
+        assert len(pts) == self.N
+        return np.array(pts)
+
+        
 
 def get_points_in_unit_cell(pts: ArrayLike, a: ArrayLike) -> Tuple[ArrayLike]:
     """ Returns all points within the unit cell defined by the vectors

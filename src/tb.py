@@ -177,6 +177,7 @@ def basis_transform_and_relabel(Hlatt: np.array,
 
     for start in range(0, len(kr), Norb):
         for i in range(start, start + Norb - 1):
+            # check that we get the same k points at different orbital indices
             assert np.allclose(kr[i], kr[i+1]), "We aren't producing the right"\
                     " k point structure -- possibly a sorting issue"
     kr = kr[::Norb]

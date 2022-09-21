@@ -49,4 +49,15 @@ def yukawa_periodic(coords: ArrayLike,
         coul += tmp
     return coul
 
+def ao2mo(eri: ArrayLike, mo_coeff: ArrayLike):
+    """ Converts eri from ao to mo basis.
+    eri (np.array): Array with shape (Nao, Nao), since we only take Coulomb
+        interaction.
+    mo_coeff (np.array): Array with shape (Nmo, Nao)
+    """
+    mo_transition = np.einsum("ai,bi->abi", mo_coeff, mo_coeff)
+    mo_eri = np.tensordot(mo_transition, eri, [-1,0])
+    mo_eri = np.tensordot(eri, mo_transition.conj(), [-1,-1])
+    return mo_eri
+
 

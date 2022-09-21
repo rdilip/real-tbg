@@ -3,6 +3,7 @@
 import numpy as np
 from typing import Tuple, List
 from numpy.typing import ArrayLike
+from scipy.spatial.distance import cdist
 from geometry import TBGGeom, get_tbg_unit_cell
 
 def mlg_k_hamiltonian(kpts: ArrayLike, t: float, deltas: ArrayLike) -> ArrayLike:
@@ -112,25 +113,31 @@ def mlg_hamiltonian(N: Tuple[int, int],
     basis = basis.reshape((2, N[0]*N[1], 2*N[0]*N[1])).transpose((1,2,0))
     return H, basis, T
 
-def _tbg_tb_hamiltonian(cell1: ArrayLike, cell2: ArrayLike, d: float, h: float) -> ArrayLike:
+def _tbg_tb_hamiltonian(cell1: ArrayLike, cell2: ArrayLike, d: float) -> ArrayLike:
     """ Returns the tight binding matrix elements between two cells, using the Slater-
-    Koster parameters for TBG.
+    Koster parameters for TBG. Equation A1 in PRX.8.031087
+    Args:
+        cell1: Array of coordinates (use 3 dimensions!)
+        cell2: Array of coordinates (use 3 dimensions!)
+        d (float): Nearest neighbor distance of monolayer
     """
     r0 = 0.184 * np.sqrt(3) * d # decay length
-    R = cell1[:, np.newaxis, :] - cell2[np.newaxis, :, :]
-    Rn = np.linalg.norm(R, axis=2)
+    dab = d * (0.335 / 0.142)
+
+    Rz = np.abs((cell1[:, np.newaxis, :] - cell2[np.newaxis, :, :])[:, :, 2])
+    Rn = cdist(cell1, cell2)
     # Vppx = -2.7 * np.exp(-(Rn - d) / r0)
-    Vppx = -2.7 * (Rn <= d + 1.e-10)
-    Vppz = 0.48 * np.exp(-(Rn - h) / r0)
-    decay = R[:, :, 2] / Rn
+    Vppx = -2.7 * (Rn <= d + 1.e-10) # this should decay, but oh well NN
+
+    Vppz = 0.48 * np.exp(-(Rn - dab) / r0)
+
+    decay = Rz / Rn
     decay *= decay
-    t = -Vppx * (1. - decay) - Vppz * decay
+    t = -Vppx * (1. - decay) + Vppz * decay
     t[np.diag_indices_from(t)] = 0.
     return t
 
-
-def tbg_neighbor_cell_hamiltonian(m: int=31,
-                                  d: float=1.,
+def tbg_neighbor_cell_hamiltonian(geom: TBGGeom,
                                   t: float=1.,
                                   mn: List[List[int]]=None) -> ArrayLike:
     """ Returns the real space effects of all the neighboring unit cells and 
@@ -142,7 +149,6 @@ def tbg_neighbor_cell_hamiltonian(m: int=31,
         t (float): hopping strength
         mn
     """
-    geom = TBGGeom(d=d, m=m)
     if mn is None:
         mn = np.array([[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1],\
                 [1, -1], [-1, 1], [-1, -1], [1,1]])
@@ -151,12 +157,11 @@ def tbg_neighbor_cell_hamiltonian(m: int=31,
     all_pts = np.vstack([uc[pt] for pt in uc])
 
     Ts = np.hstack([Ts, np.zeros((Ts.shape[0], 1))])
-    HR = np.array([_tbg_tb_hamiltonian(all_pts, all_pts+T, d, geom.h) for T in Ts])
+    HR = np.array([_tbg_tb_hamiltonian(all_pts, all_pts+T, geom.d, geom.h) for T in Ts])
     return HR, Ts
 
 def tbg_k_hamiltonian(kpts: ArrayLike,
-                      m: int=31,
-                      d: float=1.,
+                      geom: TBGGeom,
                       t: float=1.,
                       HR: ArrayLike=None,
                       Ts: ArrayLike=None) -> ArrayLike:
@@ -168,12 +173,12 @@ def tbg_k_hamiltonian(kpts: ArrayLike,
     Note: One can implement a batched version of this function, but this is 
     much, much slower at large system sizes and makes no difference at small system sizes.
     Args:
-        kpts (ArrayLike): k points
+        kpts (ArrayLike): k points. Should have shape (num k pts, 2)
         m (int): Integer characterizing rotation angle (m=31 is 1.05 degrees).
 
     """
     if HR is None or Ts is None:
-        HR, Ts = tbg_neighbor_cell_hamiltonian(m=m, d=d, t=t)
+        HR, Ts = tbg_neighbor_cell_hamiltonian(geom, t=t)
     phases = np.exp(1.j * np.einsum("ki,ti->kt", kpts, Ts[:, :2]))
     Hk = np.tensordot(phases, HR, axes=[1,0])
 
